@@ -2,45 +2,69 @@ name: CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "main" ]
 
 jobs:
   lint:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install Ruff
         run: pip install ruff
-
       - name: Lint code
         run: ruff check main.py test.py
 
   test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Run tests
         run: pytest test.py -v
+
+  # 🔥 НОВЫЙ JOB: Сборка и проверка Docker-образа
+  build:
+    runs-on: ubuntu-latest
+    # Запускаем только после успешных lint и test
+    needs: [lint, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: docker build -t cicd-app .
+
+      - name: Run container
+        run: docker run -d -p 8000:8000 --name test-container cicd-app
+
+      - name: Wait for app to start
+        run: sleep 5
+
+      - name: Test the running container
+        run: |
+          curl -f http://localhost:8000/ || exit 1
+          # Проверим, что ответ содержит JSON с ключом message
+          curl -f http://localhost:8000/ | grep -q 'message' || exit 1
+          echo "✅ Container test passed!"
+
+      - name: Stop and remove container
+        if: always()
+        run: docker rm -f test-container
